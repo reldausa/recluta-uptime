@@ -1,0 +1,43 @@
+name: uptime
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 min (GitHub may add a few min of jitter)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe n8n.recluta.app
+        run: |
+          # 3 attempts, 30s apart, so one blip doesn't page. All 3 failing
+          # fails the workflow -> GitHub emails the repo owner.
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 https://n8n.recluta.app/healthz || echo 000)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 30
+          done
+          echo "::error::n8n.recluta.app/healthz unreachable after 3 attempts — the Recluta bot is DOWN"
+          exit 1
+
+  keepalive:
+    # GitHub disables cron workflows after 60 days without repo activity;
+    # an empty commit on the 1st of each month keeps the schedule alive.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monthly keepalive commit
+        run: |
+          if [ "$(date -u +%d%H%M | cut -c1-2)" = "01" ] && [ "$(date -u +%H)" = "03" ] && [ "$(date -u +%M)" -lt 15 ]; then
+            git config user.name "uptime-bot"
+            git config user.email "actions@github.com"
+            git commit --allow-empty -m "keepalive $(date -u +%Y-%m)"
+            git push
+          else
+            echo "not keepalive window, skipping"
+          fi
