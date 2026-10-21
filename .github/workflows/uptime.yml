@@ -25,19 +25,25 @@ jobs:
           exit 1
 
   keepalive:
-    # GitHub disables cron workflows after 60 days without repo activity;
-    # an empty commit on the 1st of each month keeps the schedule alive.
+    # GitHub disables cron workflows after 60 days without repo activity.
+    # The first version committed only if a run landed between 03:00 and 03:14
+    # UTC on the 1st of the month. GitHub throttles cron on quiet repos (by
+    # October it ran this "every 10 min" schedule every 3-5 hours), so no run
+    # ever hit that window and the schedule was disabled on 2026-10-16, exactly
+    # 60 days after the first commit. Now any scheduled run commits once the
+    # last commit is 30+ days old: that leaves a month of margin, and needs only
+    # one run of any kind in it.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Monthly keepalive commit
+      - name: Keepalive commit when the repo has been quiet for 30 days
         run: |
-          if [ "$(date -u +%d%H%M | cut -c1-2)" = "01" ] && [ "$(date -u +%H)" = "03" ] && [ "$(date -u +%M)" -lt 15 ]; then
+          age_days=$(( ( $(date -u +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "last commit ${age_days} days ago"
+          if [ "$age_days" -ge 30 ]; then
             git config user.name "uptime-bot"
             git config user.email "actions@github.com"
-            git commit --allow-empty -m "keepalive $(date -u +%Y-%m)"
+            git commit --allow-empty -m "keepalive $(date -u +%Y-%m-%d)"
             git push
-          else
-            echo "not keepalive window, skipping"
           fi
